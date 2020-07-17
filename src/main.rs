@@ -3,7 +3,8 @@
 
 extern crate panic_halt;
 
-use gd32vf103_hal as hal;
+use embedded_hal::digital::v2::OutputPin;
+use gd32vf103xx_hal as hal;
 use hal::pac;
 use hal::prelude::*;
 use riscv_rt::entry;
@@ -11,9 +12,9 @@ use riscv_rt::entry;
 #[entry]
 fn main() -> ! {
     let dp = pac::Peripherals::take().unwrap();
-    let mut rcu = dp.RCU.constrain();
-    let mut gpioa = dp.GPIOA.split(&mut rcu.apb2);
-    let mut pa8 = gpioa.pa8.into_push_pull_output(&mut gpioa.ctl1);
+    let mut rcu = dp.RCU.configure().freeze();
+    let gpioa = dp.GPIOA.split(&mut rcu);
+    let mut pa8 = gpioa.pa8.into_push_pull_output();
     pa8.set_high().unwrap();
     loop {}
 }
