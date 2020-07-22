@@ -46,6 +46,7 @@ version = "0.1.0"
 dependencies = [
  "embedded-hal 0.2.3 (registry+https://github.com/rust-lang/crates.io-index)",
  "gd32vf103xx-hal 0.3.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "nb 0.1.2 (registry+https://github.com/rust-lang/crates.io-index)",
  "panic-halt 0.2.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "riscv-rt 0.6.1 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
