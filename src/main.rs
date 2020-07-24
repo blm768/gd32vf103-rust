@@ -33,7 +33,7 @@ fn tx_at_cmd<T: Write<u8>>(cmd: impl IntoIterator<Item = u8>, tx: &mut T) -> Res
 }
 
 fn rx_at_cmd<T: Read<u8>>(buf: &mut [u8], rx: &mut T) -> Result<usize, RxAtCmdError<T::Error>> {
-    // TOOD: why aren't we getting these?
+    // TODO: why aren't we getting these?
     /*
     let byte = block!(rx.read())?;
     if byte != b'\r' {
