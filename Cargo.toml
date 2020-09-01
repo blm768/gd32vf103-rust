@@ -6,11 +6,18 @@ edition = "2018"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+atat = { path = "./atat/atat" }
 embedded-hal = "0.2.3"
 gd32vf103xx-hal = "0.3"
-panic-halt = "0.2"
+heapless = "0.5.5"
 nb = "0.1"
+panic-halt = "0.2"
 riscv-rt = "0.6"
+serde_at = { path = "./atat/serde_at" }
+
+[dependencies.serde]
+version = "1.0"
+default-features = false
 
 # this lets you use `cargo fix`!
 [[bin]]

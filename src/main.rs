@@ -5,12 +5,20 @@ extern crate panic_halt;
 
 use core::convert::Infallible;
 
+use atat::atat_derive::{AtatCmd, AtatResp};
+use atat::{AtatClient, ClientBuilder, ComQueue, NoopUrcMatcher, Queues, ResQueue, UrcQueue};
+
 use embedded_hal::serial::{Read, Write};
 
 use gd32vf103xx_hal as hal;
 use hal::pac;
+use hal::pac::USART1;
 use hal::prelude::*;
-use hal::serial::{Config, Serial};
+use hal::serial::{Config, Rx, Serial};
+use hal::timer::Timer;
+
+use heapless::consts;
+use heapless::spsc::Queue;
 
 use nb::block;
 
@@ -25,64 +33,15 @@ fn tx_bytes<T: Write<u8>>(cmd: impl IntoIterator<Item = u8>, tx: &mut T) -> Resu
     Ok(())
 }
 
-fn tx_at_cmd<T: Write<u8>>(cmd: impl IntoIterator<Item = u8>, tx: &mut T) -> Result<(), T::Error> {
-    tx_bytes(cmd, tx)?;
-    block!(tx.write(b'\r'))?;
-    block!(tx.write(b'\n'))?;
-    block!(tx.flush())
-}
+#[derive(Clone, AtatCmd)]
+#[at_cmd("+RST", ResetResponse)]
+pub struct Reset;
 
-fn rx_at_cmd<T: Read<u8>>(buf: &mut [u8], rx: &mut T) -> Result<usize, RxAtCmdError<T::Error>> {
-    // TODO: why aren't we getting these?
-    /*
-    let byte = block!(rx.read())?;
-    if byte != b'\r' {
-        panic!();
-        return Err(RxAtCmdError::InvalidDelimiter(byte));
-    }
-    let byte = block!(rx.read())?;
-    if byte != b'\n' {
-        return Err(RxAtCmdError::InvalidDelimiter(byte));
-    }
-    */
-    let mut count = 0;
-    loop {
-        let byte = block!(rx.read())?;
-        match byte {
-            // TODO: how are inline \r characters handled in AT commands?
-            b'\r' => {
-                let byte = b'\n';
-                // TODO: Why not getting this?
-                //let byte = block!(rx.read())?;
-                match byte {
-                    b'\n' => break,
-                    _ => return Err(RxAtCmdError::InvalidDelimiter(byte)),
-                }
-            }
-            _ => {
-                if count >= buf.len() {
-                    return Err(RxAtCmdError::TooLong);
-                }
-                buf[count] = byte;
-                count += 1;
-            }
-        }
-    }
+#[derive(Clone, AtatResp)]
+pub struct ResetResponse;
 
-    Ok(count)
-}
-
-enum RxAtCmdError<E> {
-    InvalidDelimiter(u8),
-    TooLong,
-    Other(E),
-}
-
-impl<E> From<E> for RxAtCmdError<E> {
-    fn from(e: E) -> Self {
-        Self::Other(e)
-    }
-}
+static mut INGRESS: Option<atat::IngressManager> = None;
+static mut RX: Option<Rx<USART1>> = None;
 
 #[entry]
 fn main() -> ! {
@@ -104,8 +63,8 @@ fn main() -> ! {
     );
     let (mut dbg_tx, _) = dbg_serial.split();
 
-    tx_bytes("Initialized serial\r\n".bytes(), &mut dbg_tx)
-        .unwrap_or_else(|_: Infallible| unreachable!());
+    //tx_bytes("Initialized serial\r\n".bytes(), &mut dbg_tx)
+    //.unwrap_or_else(|_: Infallible| unreachable!());
 
     let ser_tx = gpioa.pa2;
     let ser_rx = gpioa.pa3;
@@ -117,19 +76,55 @@ fn main() -> ! {
         &mut rcu,
     );
 
+    static mut RES_QUEUE: ResQueue<consts::U256, consts::U5> = Queue(heapless::i::Queue::u8());
+    static mut URC_QUEUE: UrcQueue<consts::U256, consts::U10> = Queue(heapless::i::Queue::u8());
+    static mut COM_QUEUE: ComQueue<consts::U3> = Queue(heapless::i::Queue::u8());
+
+    let queues = Queues {
+        res_queue: unsafe { RES_QUEUE.split() },
+        urc_queue: unsafe { URC_QUEUE.split() },
+        com_queue: unsafe { COM_QUEUE.split() },
+    };
+
     let (mut tx, mut rx) = serial.split();
-    tx_at_cmd("AT+RST".bytes(), &mut tx).unwrap_or_else(|_: Infallible| unreachable!());
 
-    let mut recv_buf = [0u8; 64];
-    let recv_count = rx_at_cmd(&mut recv_buf, &mut rx)
-        .map_err(|_| ())
-        .expect("Failed to reset modem");
-    let rx_msg = &recv_buf[0..recv_count];
+    let timer = Timer::timer1(dp.TIMER1, 1.hz(), &mut rcu);
 
-    tx_bytes(rx_msg.iter().copied(), &mut dbg_tx).unwrap();
-    if rx_msg == b"OK" {
-        status.set_mode(PinMode::High);
-    }
+    tx_bytes("Initialized serial\r\n".bytes(), &mut dbg_tx)
+        .unwrap_or_else(|_: Infallible| unreachable!());
+
+    let (mut client, ingress) = ClientBuilder::new(
+        tx,
+        timer,
+        |t| t.khz().into(),
+        atat::Config::new(atat::Mode::Timeout),
+    )
+    .with_custom_urc_matcher(NoopUrcMatcher {})
+    .build(queues);
+
+    unsafe { INGRESS = Some(ingress) };
+    unsafe { RX = Some(rx) };
+
+    client.send(&Reset).unwrap();
+
+    status.set_mode(PinMode::High);
 
     loop {}
 }
+
+/*
+#[interrupt]
+fn TIM7() {
+    let ingress = unsafe { INGRESS.as_mut().unwrap() };
+    ingress.parse_at();
+}
+
+#[interrupt]
+fn USART2() {
+    let ingress = unsafe { INGRESS.as_mut().unwrap() };
+    let rx = unsafe { RX.as_mut().unwrap() };
+    if let Ok(d) = nb::block!(rx.read()) {
+        ingress.write(&[d]);
+    }
+}
+*/
